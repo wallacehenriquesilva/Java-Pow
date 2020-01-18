@@ -1,0 +1,16 @@
+
+\$squid:AssignmentInSubExpressionCheck".Extract the assignment out of this expression.(ôÆ²
+bsquid:S2259"HA "NullPointerException" could be thrown; "headersMap" is nullable here.(à«ŠÎúÿÿÿÿ
+bsquid:S2259"HA "NullPointerException" could be thrown; "headersMap" is nullable here.(à«ŠÎúÿÿÿÿ
+bsquid:S2259"HA "NullPointerException" could be thrown; "headersMap" is nullable here.(à«ŠÎúÿÿÿÿ
+=squid:S1148"#Use a logger to log this exception.(€ÉÔ…ıÿÿÿÿ
+=squid:S1148"#Use a logger to log this exception.(€ÉÔ…ıÿÿÿÿ
+=squid:S1148"#Use a logger to log this exception.(€ÉÔ…ıÿÿÿÿ
+lsquid:S3776"RRefactor this method to reduce its Cognitive Complexity from 38 to the 15 allowed.(´³íÓûÿÿÿÿ
+Ysquid:CallToDeprecatedMethod"3Remove this use of "newInstance"; it is deprecated.(İáéÔ
+Zsquid:CallToDeprecatedMethod"4Remove this use of "isAccessible"; it is deprecated.(¼«èµ
+Zsquid:CallToDeprecatedMethod"4Remove this use of "isAccessible"; it is deprecated.(¼«èµ
+Zsquid:CallToDeprecatedMethod"4Remove this use of "isAccessible"; it is deprecated.(¼«èµ
+lsquid:S3776"RRefactor this method to reduce its Cognitive Complexity from 16 to the 15 allowed.(‰²†Ïùÿÿÿÿ
+Ysquid:CallToDeprecatedMethod"3Remove this use of "newInstance"; it is deprecated.(«ı¹ò
+Zsquid:CallToDeprecatedMethod"4Remove this use of "isAccessible"; it is deprecated.(¼«èµ
