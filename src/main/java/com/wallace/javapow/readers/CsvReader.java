@@ -4,15 +4,30 @@ import com.wallace.javapow.annotations.Csv;
 import com.wallace.javapow.annotations.CsvBooleanColumn;
 import com.wallace.javapow.annotations.CsvCollectionColumn;
 import com.wallace.javapow.annotations.CsvColumn;
+import com.wallace.javapow.annotations.CsvDateColumn;
 import com.wallace.javapow.enums.ColumnTypeEnum;
+import com.wallace.javapow.exceptions.InvalidCsvClassException;
+import com.wallace.javapow.exceptions.InvalidDelimiterException;
+import com.wallace.javapow.exceptions.InvalidPathException;
 
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.ParameterizedType;
-import java.util.*;
+import java.text.SimpleDateFormat;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Date;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -23,35 +38,35 @@ public class CsvReader<T> {
         this.genericType = genericType;
     }
 
+    public List<T> read() {
+        final String path = this.getPathAnnotationValue();
+        return read(path);
+    }
+
     public List<T> read(String csvFilePath) {
-        List<T> objectList = new ArrayList<>();
-        boolean isValid = Arrays.stream(genericType.getAnnotations())
-                .anyMatch(annotation -> annotation instanceof Csv);
+        final List<T> objectList = new ArrayList<>();
 
-        if (!isValid) {
-            return Collections.emptyList();
-        }
+        this.validateClass();
 
-        final String delimiter = Arrays.stream(genericType.getAnnotations())
-                .filter(annotation -> annotation instanceof Csv)
-                .findFirst()
-                .map(annotation -> ((Csv) annotation).delimiter())
-                .orElse(";");
+        final String delimiter = this.getDelimiter();
 
-        Map<String, Integer> headersMap = this.getHeaders(csvFilePath, delimiter);
+        final Map<String, Integer> headersMap = this.getHeaders(csvFilePath, delimiter);
 
         String line = "";
+
         int row = 0;
 
         try (BufferedReader bufferedReader = new BufferedReader(new FileReader(csvFilePath))) {
             while (Objects.nonNull(line = bufferedReader.readLine())) {
-                T object = genericType.newInstance();
+                T object = genericType.getDeclaredConstructor().newInstance();
+
                 if (row == 0) {
                     row++;
                     continue;
                 }
-                String[] values = line.split(delimiter);
-                Field[] fields = genericType.getDeclaredFields();
+
+                final String[] values = line.split(delimiter);
+                final Field[] fields = genericType.getDeclaredFields();
 
                 for (Field field : fields) {
                     Annotation[] annotations = field.getDeclaredAnnotations();
@@ -59,19 +74,17 @@ public class CsvReader<T> {
                         if (annotation instanceof CsvColumn) {
                             String name = ((CsvColumn) annotation).name();
                             ColumnTypeEnum columnTypeEnum = ((CsvColumn) annotation).type();
-                            int column = headersMap.get(name);
+                            int column = Objects.nonNull(headersMap) ? headersMap.get(name) : 0;
                             if (values.length > column) {
                                 Object value = columnTypeEnum.transform(values[column]);
-                                boolean accessible = field.isAccessible();
                                 field.setAccessible(true);
                                 field.set(object, value);
-                                field.setAccessible(accessible);
                             }
                         } else if (annotation instanceof CsvBooleanColumn) {
                             String name = ((CsvBooleanColumn) annotation).name();
                             boolean isCaseSensitive = ((CsvBooleanColumn) annotation).isCaseSensitive();
                             String[] trueValues = ((CsvBooleanColumn) annotation).trueValues();
-                            int column = headersMap.get(name);
+                            int column = Objects.nonNull(headersMap) ? headersMap.get(name) : 0;
                             if (values.length > column) {
                                 String value = values[column];
                                 Object val;
@@ -80,69 +93,102 @@ public class CsvReader<T> {
                                 } else {
                                     val = Arrays.stream(trueValues).anyMatch(value::equalsIgnoreCase);
                                 }
-                                boolean accessible = field.isAccessible();
+
                                 field.setAccessible(true);
                                 field.set(object, val);
-                                field.setAccessible(accessible);
                             }
                         } else if (annotation instanceof CsvCollectionColumn) {
-                            String name = ((CsvCollectionColumn) annotation).name();
-                            int column = headersMap.get(name);
+                            final String name = ((CsvCollectionColumn) annotation).name();
+                            int column = Objects.nonNull(headersMap) ? headersMap.get(name) : 0;
                             if (values.length > column) {
-                                String columnDelimiter = ((CsvCollectionColumn) annotation).collectionDelimiterRegex();
-                                ParameterizedType pt = (ParameterizedType) field.getGenericType();
-                                Class clazz = (Class) pt.getActualTypeArguments()[0];
-                                Object value = this.transformObject(clazz, values[column], name, columnDelimiter);
-                                boolean accessible = field.isAccessible();
+                                final String columnDelimiter = ((CsvCollectionColumn) annotation).collectionDelimiterRegex();
+                                final Class<?> collectionClass = field.getType();
+                                final Object value = this.transformObject(values[column], columnDelimiter, field, collectionClass);
                                 field.setAccessible(true);
                                 field.set(object, value);
-                                field.setAccessible(accessible);
+                            }
+                        } else if (annotation instanceof CsvDateColumn) {
+                            final String name = ((CsvDateColumn) annotation).name();
+                            final String pattern = ((CsvDateColumn) annotation).pattern();
+
+                            final Class<?> fieldClass = ((Class<?>) field.getGenericType());
+
+                            int column = Objects.nonNull(headersMap) ? headersMap.get(name) : 0;
+
+                            if (values.length > column) {
+
+                                final String value = values[column];
+                                Object ret = null;
+
+
+                                if (fieldClass.isInstance(new Date())) {
+                                    try {
+                                        ret = new SimpleDateFormat(pattern).parse(value);
+                                    } catch (Exception e) {
+                                        ret = null;
+                                    }
+                                } else if (fieldClass.isInstance(LocalDateTime.now())) {
+                                    DateTimeFormatter formatter = DateTimeFormatter.ofPattern(pattern);
+                                    ret = LocalDateTime.parse(value, formatter);
+                                } else if (fieldClass.isInstance(LocalDate.now())) {
+                                    DateTimeFormatter formatter = DateTimeFormatter.ofPattern(pattern);
+                                    ret = LocalDate.parse(value, formatter);
+                                }
+
+                                field.setAccessible(true);
+                                field.set(object, ret);
                             }
                         }
                     }
                 }
                 objectList.add(object);
             }
-        } catch (IOException | IllegalAccessException | InstantiationException e) {
+        } catch (IOException | IllegalAccessException | InstantiationException | NoSuchMethodException | InvocationTargetException e) {
             e.printStackTrace();
         }
         return objectList;
     }
 
-    private Collection<?> transformObject(Class clazz, String value, String columnName, String delimiter) {
-        String[] valores = value.split(delimiter);
-        Set<Object> objectsList = new HashSet<>();
-        try {
-            for (String val : valores) {
-                val = val.trim();
-                Object object = clazz.newInstance();
-                Field[] fields = clazz.getDeclaredFields();
-                for (Field field : fields) {
-                    Annotation[] annotations = field.getDeclaredAnnotations();
-                    for (Annotation annotation : annotations) {
-                        if (annotation instanceof CsvColumn) {
-                            String name = ((CsvColumn) annotation).name();
-                            if (columnName.equals(name)) {
-                                boolean accessible = field.isAccessible();
-                                field.setAccessible(true);
-                                field.set(object, val);
-                                field.setAccessible(accessible);
-                            }
-                        }
-                    }
-                }
-                objectsList.add(object);
-            }
-        } catch (IllegalAccessException | InstantiationException e) {
-            e.printStackTrace();
+    private Object transformObject(String value, String delimiter, Field field, Class<?> collectionClass) {
+        final String[] valores = value.split(delimiter);
+
+        if (collectionClass.isInstance(new String[]{})) {
+            return valores;
+        } else if (collectionClass.isInstance(new Integer[]{})) {
+            return Arrays.stream(valores).map(Integer::valueOf).toArray(Integer[]::new);
+        } else if (collectionClass.isInstance(new Long[]{})) {
+            return Arrays.stream(valores).map(Long::valueOf).toArray(Long[]::new);
+        } else if (collectionClass.isInstance(new Boolean[]{})) {
+            return Arrays.stream(valores).map(Boolean::valueOf).toArray(Boolean[]::new);
+        } else if (collectionClass.isInstance(new ArrayList<>())) {
+            return Arrays.stream(valores).map(val -> this.transformValue(field, val)).collect(Collectors.toList());
+        } else if (collectionClass.isInstance(new HashSet<>())) {
+            return Arrays.stream(valores).map(val -> this.transformValue(field, val)).collect(Collectors.toSet());
+        } else {
+            return null;
         }
-        return objectsList;
+    }
+
+    private Object transformValue(Field field, String value) {
+        final ParameterizedType integerListType = (ParameterizedType) field.getGenericType();
+        final Class<?> type = (Class<?>) integerListType.getActualTypeArguments()[0];
+
+        if (type.isInstance("")) {
+            return value;
+        } else if (type.isInstance(Integer.valueOf("0"))) {
+            return Integer.valueOf(value);
+        } else if (type.isInstance(Long.valueOf("0"))) {
+            return Long.valueOf(value);
+        } else if (type.isInstance(Boolean.valueOf("0"))) {
+            return Boolean.valueOf(value);
+        }
+        return null;
     }
 
     private Map<String, Integer> getHeaders(final String csvFilePath, final String delimiter) {
-        String line = "";
         try (BufferedReader bufferedReader = new BufferedReader(new FileReader(csvFilePath))) {
-            if (Objects.nonNull(line = bufferedReader.readLine())) {
+            final String line = bufferedReader.readLine();
+            if (Objects.nonNull(line)) {
                 String[] data = line.split(delimiter);
                 AtomicInteger atomicInteger = new AtomicInteger(0);
                 return Arrays.stream(data)
@@ -156,4 +202,28 @@ public class CsvReader<T> {
         }
         return null;
     }
+
+    private String getPathAnnotationValue() {
+        return Arrays.stream(genericType.getAnnotations())
+                .filter(annotation -> annotation instanceof Csv)
+                .findFirst()
+                .map(annotation -> ((Csv) annotation).path())
+                .orElseThrow(InvalidPathException::new);
+    }
+
+    private String getDelimiter() {
+        return Arrays.stream(genericType.getAnnotations())
+                .filter(annotation -> annotation instanceof Csv)
+                .findFirst()
+                .map(annotation -> ((Csv) annotation).delimiter())
+                .orElseThrow(InvalidDelimiterException::new);
+    }
+
+    private void validateClass() {
+        if (Arrays.stream(genericType.getAnnotations())
+                .noneMatch(annotation -> annotation instanceof Csv)) {
+            throw new InvalidCsvClassException();
+        }
+    }
+
 }
